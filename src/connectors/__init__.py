@@ -1,1 +1,2 @@
 from connectors.rest_connector import RestConnector
+from connectors.dict_connector import DictConnector, DictUnavailable

@@ -37,6 +37,7 @@ CREATE INDEX account_document_number_idx ON account(document_number);
 CREATE TABLE transaction(
     id                              SERIAL PRIMARY KEY,
     pix_id                          VARCHAR(16) NOT NULL,
+    payload_hash                    CHAR(64) NOT NULL,
     transaction_key                 UUID NOT NULL,
     amount                          BIGINT NOT NULL,
     transaction_date                TIMESTAMPTZ NOT NULL,

@@ -25,6 +25,8 @@ class PixTransaction(Base):
 
     id = Column(Integer, primary_key=True)
     pix_id = Column(String(16), nullable=False)
+    # SHA-256 do payload recebido: o mesmo pix_id com outro conteúdo é conflito.
+    payload_hash = Column(String(64), nullable=False)
     transaction_key = Column(UUID(as_uuid=False), nullable=False)
     amount = Column(BigInteger, nullable=False)
     transaction_date = Column(DateTime(timezone=True), nullable=False)

@@ -4,7 +4,10 @@ from tests.utils import DbUtils, PayloadGenerator, RequestGenerator
 
 
 def registra_e_bloqueia(papel: str) -> tuple:
-    """Registra as contas com um Pix aprovado e bloqueia a do `papel` pedido.
+    """Registra as contas com um Pix e bloqueia a do `papel` pedido.
+
+    O primeiro Pix pede 2FA (aparelho novo); depois dele, o aparelho passa a
+    ser reconhecido, e os Pix seguintes pelo mesmo aparelho são aprovados.
 
     Devolve o primeiro payload (pra reaproveitar as contas) e o id da conta
     bloqueada.
@@ -12,7 +15,7 @@ def registra_e_bloqueia(papel: str) -> tuple:
     primeiro = PayloadGenerator.create_pix_transaction_payload()
     status, response = RequestGenerator.POST_pix_transaction(primeiro)
     assert status == 201
-    assert response["status"] == "approved"
+    assert response["status"] == "two_factor_required"
 
     conta = primeiro[papel]
     account_id = DbUtils.block_account(conta["branch"], conta["account_number"])
@@ -20,10 +23,11 @@ def registra_e_bloqueia(papel: str) -> tuple:
 
 
 def mesmas_contas(primeiro: dict) -> dict:
-    """Um Pix novo entre as mesmas duas contas do `primeiro`."""
+    """Um Pix novo entre as mesmas duas contas do `primeiro`, pelo mesmo aparelho."""
     payload = PayloadGenerator.create_pix_transaction_payload()
     payload["source_account"] = deepcopy(primeiro["source_account"])
     payload["destination_account"] = deepcopy(primeiro["destination_account"])
+    payload["source"]["device_id"] = primeiro["source"]["device_id"]
     return payload
 
 
@@ -61,6 +65,7 @@ class TestBlockedAccount:
 
         outro_destino = PayloadGenerator.create_pix_transaction_payload()
         outro_destino["source_account"] = deepcopy(primeiro["source_account"])
+        outro_destino["source"]["device_id"] = primeiro["source"]["device_id"]
 
         status, response = RequestGenerator.POST_pix_transaction(outro_destino)
 

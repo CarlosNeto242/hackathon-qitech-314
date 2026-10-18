@@ -14,18 +14,23 @@ class TestPixTransactionIdempotency:
         assert status == 200
         assert segunda == primeira
 
-    def test_repeated_pix_id_is_not_reanalyzed(self):
-        """O mesmo pix_id com outro conteúdo devolve a análise ORIGINAL: o id
-        identifica o Pix, e um Pix já decidido não volta a ser decidido."""
+    def test_same_pix_id_with_other_content_is_a_conflict(self):
+        """O mesmo pix_id com outro conteúdo é 409: devolver a análise antiga
+        seria aprovar uma transação que nunca foi analisada. O Pix original
+        continua gravado e consultável, intacto."""
         payload = PayloadGenerator.create_pix_transaction_payload()
         status, primeira = RequestGenerator.POST_pix_transaction(payload)
         assert status == 201
 
         outro = PayloadGenerator.create_pix_transaction_payload(pix_id=payload["id"], amount=999)
-        status, segunda = RequestGenerator.POST_pix_transaction(outro)
+        status, response = RequestGenerator.POST_pix_transaction(outro)
 
+        assert status == 409
+        assert response["code"] == "QIT002008"
+
+        status, consultado = RequestGenerator.GET_pix_transaction(payload["id"])
         assert status == 200
-        assert segunda == primeira
+        assert consultado == primeira
 
     def test_concurrent_requests_with_same_pix_id(self):
         """Dez requisições iguais ao mesmo tempo: uma analisa (201), as outras
