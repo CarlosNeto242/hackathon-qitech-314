@@ -20,6 +20,15 @@ INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN")
 # O enunciado não informa o ISPB; o padrão abaixo ainda precisa ser confirmado.
 BANK_ISPB = os.environ.get("BANK_ISPB", "32402502")
 
+# O DICT do Banco Central (na sua máquina, um mock). O endereço vem do
+# ambiente: o mesmo connector fala com o mock e falaria com o real.
+DICT_API_URL = os.environ.get("DICT_API_URL", "http://localhost:8081")
+DICT_API_INTERNAL_TOKEN = os.environ.get("DICT_API_INTERNAL_TOKEN", "default_token")
+
+# Em SEGUNDOS, e fracionário de propósito: o DICT está no caminho do Pix,
+# que tem poucos segundos pra decidir. Passou disso, o motor segue sem ele.
+DICT_API_TIMEOUT = float(os.environ.get("DICT_API_TIMEOUT", "0.3"))
+
 # Rotas públicas: não exigem o header INTERNAL-TOKEN. São as duas que
 # precisam responder pra quem ainda não tem token nenhum: a raiz, que
 # diz quem é este serviço, e o health check, que o Docker consulta pra

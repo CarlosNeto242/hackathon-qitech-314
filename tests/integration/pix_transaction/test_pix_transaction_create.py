@@ -5,14 +5,36 @@ from tests.utils import PayloadGenerator, RandomGenerator, RequestGenerator
 from tests.utils.requisition import ClientRequisition
 
 
+def mesma_origem_e_aparelho(primeiro: dict) -> dict:
+    """Um Pix novo da mesma conta de origem, pelo mesmo aparelho."""
+    payload = PayloadGenerator.create_pix_transaction_payload()
+    payload["source_account"] = deepcopy(primeiro["source_account"])
+    payload["source"]["device_id"] = primeiro["source"]["device_id"]
+    return payload
+
+
 class TestPixTransactionCreate:
-    def test_approves_valid_pix(self):
+    def test_first_pix_of_account_requires_2fa(self):
+        """O primeiro Pix de toda conta vem de um aparelho que ela nunca usou."""
         payload = PayloadGenerator.create_pix_transaction_payload()
 
         status, response = RequestGenerator.POST_pix_transaction(payload)
 
         assert status == 201
         assert UUID(response["key"])
+        assert response["status"] == "two_factor_required"
+        assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
+
+    def test_approves_pix_from_recognized_device(self):
+        """Depois do 2FA, o aparelho passa a ser reconhecido e o Pix normal é
+        aprovado, com metadata vazio."""
+        primeiro = PayloadGenerator.create_pix_transaction_payload()
+        status, _response = RequestGenerator.POST_pix_transaction(primeiro)
+        assert status == 201
+
+        status, response = RequestGenerator.POST_pix_transaction(mesma_origem_e_aparelho(primeiro))
+
+        assert status == 201
         assert response["status"] == "approved"
         assert response["metadata"] == {}
 
@@ -33,7 +55,7 @@ class TestPixTransactionCreate:
         status, response = RequestGenerator.POST_pix_transaction(payload)
 
         assert status == 201
-        assert response["status"] == "approved"
+        assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
 
     def test_geolocation_is_optional(self):
         """Sem o campo e com o campo nulo: os dois são "não veio localização"."""
@@ -46,7 +68,7 @@ class TestPixTransactionCreate:
         for payload in (sem_campo, campo_nulo):
             status, response = RequestGenerator.POST_pix_transaction(payload)
             assert status == 201
-            assert response["status"] == "approved"
+            assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
 
 
 class TestPixTransactionSchema:

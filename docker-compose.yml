@@ -35,6 +35,12 @@ services:
       # A senha que protege os endpoints internos. O padrao vale pra
       # estudar; num sistema de verdade, isso nunca teria valor padrao.
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-default_token}
+      # O DICT do Banco Central (aqui, o mock do servico dict-mock la embaixo).
+      # Variavel que nao esta nesta lista NAO CHEGA no container. Dentro do
+      # compose, o mock atende pelo nome do servico.
+      DICT_API_URL: ${DICT_API_URL:-http://dict-mock:8081}
+      DICT_API_INTERNAL_TOKEN: ${DICT_API_INTERNAL_TOKEN:-default_token}
+      DICT_API_TIMEOUT: ${DICT_API_TIMEOUT:-0.3}
       # O ISPB deste banco: o participant de toda conta de origem.
       BANK_ISPB: ${BANK_ISPB:-32402502}
     volumes:
@@ -56,6 +62,16 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      dict-mock:
+        condition: service_started
+
+  # Mock do DICT do Banco Central (mocks/dict/server.py). Documentos fixos:
+  # 11144477735 marcado como conta laranja, 22255588846 lento (passa do
+  # timeout), 33366699957 responde 500; qualquer outro, sem marcacao.
+  dict-mock:
+    build: ./mocks/dict/.
+    ports:
+      - "${DICT_MOCK_PORT:-8081}:8081"
 
   db:
     build: ./database/.

@@ -24,6 +24,39 @@ DATABASE_OFFLINE = (
 )
 
 
+SEED_TRANSACTIONS = """
+    INSERT INTO transaction (pix_id, payload_hash, transaction_key, amount, transaction_date, created_at,
+                             source_account_id, destination_account_id, device_id, channel, ip, status,
+                             decision_reasons, latitude, longitude)
+    SELECT 'seed-' || substr(md5(random()::text), 1, 11), encode(sha256(random()::text::bytea), 'hex'),
+           gen_random_uuid(), :amount,
+           now() - make_interval(mins => :minutes_ago), now() - make_interval(mins => :minutes_ago),
+           :source, :destination, :device_id, 'app', '127.0.0.1',
+           CAST(:status AS transaction_status), CAST(:reasons AS decision_reason[]),
+           CAST(:latitude AS double precision), CAST(:longitude AS double precision)
+    FROM generate_series(1, :count)
+    RETURNING id
+"""
+
+SEED_FROM_DISTINCT_PAYERS = """
+    WITH payers AS (
+        INSERT INTO account (participant, branch, account_number, opening_date, document_number)
+        SELECT '32402502', '9999', 'seed' || substr(md5(random()::text), 1, 12), now() - interval '400 days',
+               lpad(floor(random() * 1e11)::bigint::text, 11, '0')
+        FROM generate_series(1, :count)
+        RETURNING id
+    )
+    INSERT INTO transaction (pix_id, payload_hash, transaction_key, amount, transaction_date, created_at,
+                             source_account_id, destination_account_id, device_id, channel, ip, status)
+    SELECT 'seed-' || substr(md5(random()::text), 1, 11), encode(sha256(random()::text::bytea), 'hex'),
+           gen_random_uuid(), :amount,
+           now() - make_interval(mins => :minutes_ago), now() - make_interval(mins => :minutes_ago),
+           payers.id, :destination, 'dvc-seed', 'app', '127.0.0.1', 'approved'
+    FROM payers
+    RETURNING id
+"""
+
+
 class DbUtils:
     """Apaga o banco inteiro e o recria do zero — quando alguém chama.
 
@@ -112,3 +145,95 @@ class DbUtils:
             raise RuntimeError(message) from None
         finally:
             engine.dispose()
+
+    @staticmethod
+    def account_id(branch: str, account_number: str) -> int:
+        rows = DbUtils._execute(
+            "SELECT id FROM account WHERE branch = :branch AND account_number = :account_number",
+            {"branch": branch, "account_number": account_number},
+        )
+        assert len(rows) == 1, f"esperava uma conta {branch}/{account_number}, achei {len(rows)}"
+        return rows[0].id
+
+    @staticmethod
+    def transaction_id(pix_id: str) -> int:
+        return DbUtils._execute("SELECT id FROM transaction WHERE pix_id = :pix_id", {"pix_id": pix_id})[0].id
+
+    # ─── Semeadura de histórico ─────────────────────────────────────────
+    #
+    # Pela API, todo Pix nasce com o horário de AGORA: não dá pra criar um
+    # histórico de 10 dias atrás sem esperar 10 dias. As regras que olham o
+    # passado (perfil de valor, média do CNPJ, pagadores de conta nova) só são
+    # testáveis com o histórico plantado direto no banco. O resto da jornada
+    # (o Pix que é decidido) continua passando pela API.
+
+    @staticmethod
+    def seed_sent(
+        source_account_id: int,
+        destination_account_id: int,
+        count: int,
+        amount: int,
+        device_id: str,
+        days_ago: int = 0,
+        minutes_ago: int = 0,
+        two_factor_reason: str = None,
+        geolocation: dict = None,
+    ) -> None:
+        """`count` Pix enviados pela conta, `days_ago` dias e `minutes_ago`
+        minutos atrás. Aprovados; com `two_factor_reason`, com 2FA por esse
+        motivo."""
+        DbUtils._execute(
+            SEED_TRANSACTIONS,
+            {
+                "count": count,
+                "amount": amount,
+                "minutes_ago": days_ago * 24 * 60 + minutes_ago,
+                "source": source_account_id,
+                "destination": destination_account_id,
+                "device_id": device_id,
+                "status": "two_factor_required" if two_factor_reason else "approved",
+                "reasons": "{" + two_factor_reason + "}" if two_factor_reason else "{}",
+                "latitude": geolocation["latitude"] if geolocation else None,
+                "longitude": geolocation["longitude"] if geolocation else None,
+            },
+        )
+
+    @staticmethod
+    def seed_received_from_distinct_payers(
+        destination_account_id: int, count: int, amount: int, minutes_ago: int
+    ) -> None:
+        """`count` Pix aprovados recebidos pela conta, cada um de uma conta
+        pagadora diferente (criada aqui), `minutes_ago` minutos atrás."""
+        DbUtils._execute(
+            SEED_FROM_DISTINCT_PAYERS,
+            {
+                "count": count,
+                "amount": amount,
+                "minutes_ago": minutes_ago,
+                "destination": destination_account_id,
+            },
+        )
+
+    @staticmethod
+    def age_transaction(pix_id: str, days: int) -> None:
+        """Empurra um Pix já analisado `days` dias pro passado.
+
+        Serve pra montar um cliente "antigo": o Pix que registrou a conta e o
+        aparelho aconteceu agora, mas na história do teste ele é de dias atrás,
+        e não pode contar nas janelas de velocidade da rotina que vem depois.
+        """
+        DbUtils._execute(
+            "UPDATE transaction SET created_at = created_at - make_interval(days => :days) "
+            "WHERE pix_id = :pix_id RETURNING id",
+            {"pix_id": pix_id, "days": days},
+        )
+
+    @staticmethod
+    def age_received(account_id: int, days: int) -> None:
+        """Empurra todos os Pix recebidos pela conta `days` dias pro passado,
+        pra encenar algo que aconteceu antes (fora das janelas de velocidade)."""
+        DbUtils._execute(
+            "UPDATE transaction SET created_at = created_at - make_interval(days => :days) "
+            "WHERE destination_account_id = :account_id RETURNING id",
+            {"account_id": account_id, "days": days},
+        )

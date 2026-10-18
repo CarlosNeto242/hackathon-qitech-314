@@ -85,3 +85,21 @@ class AccountAlreadyPermitted(QIException):
         description = f"Account with id {account_id} is not blocked."
         translation = "Essa conta não está bloqueada."
         super().__init__(title, self.code, http_status, description, translation)
+
+
+class PixIdConflict(QIException):
+    """O pix_id já foi usado por um Pix com outro conteúdo.
+
+    Reenvio com o MESMO conteúdo é idempotência e devolve a análise gravada.
+    Com conteúdo diferente, devolver a análise antiga seria aprovar uma
+    transação que nunca foi analisada (outro valor, outro destino).
+    """
+
+    code = "QIT002008"
+
+    def __init__(self, pix_id) -> None:
+        title = "Pix id conflict"
+        http_status = 409
+        description = f"Pix id {pix_id} was already used by a transaction with different content."
+        translation = "Esse id de Pix já foi usado por outra transação, com outro conteúdo."
+        super().__init__(title, self.code, http_status, description, translation)
