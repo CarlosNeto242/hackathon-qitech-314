@@ -23,7 +23,7 @@ class TestPixTransactionIdempotency:
         status, response = RequestGenerator.POST_pix_transaction(other)
 
         assert status == 409
-        assert response["code"] == "QIT002008"
+        assert response["code"] == "QIT001014"
 
         status, fetched = RequestGenerator.GET_pix_transaction(payload["id"])
         assert status == 200
