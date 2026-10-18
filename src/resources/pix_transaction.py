@@ -7,7 +7,6 @@ from utils.schema_handler import SchemaHandler
 
 
 class PixTransactionResource:
-
     @SchemaHandler.validate("post_pix_transaction.json")
     def on_post(self, payload: dict) -> JSONResponse:
         controller = PixTransactionController()

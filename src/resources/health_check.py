@@ -7,7 +7,6 @@ from constants import SERVICE_NAME
 
 
 class HealthCheckResource:
-
     def on_get_home(self) -> JSONResponse:
         home = {"service": SERVICE_NAME, "id": str(os.getpid())}
 

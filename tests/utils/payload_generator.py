@@ -11,15 +11,7 @@ class PayloadGenerator:
         source_document_number: str = None,
         destination_document_number: str = None,
     ) -> dict:
-        """Um Pix valido, com contas novas a cada chamada.
-
-        As contas saem com numero aleatorio porque todos os testes dividem
-        o mesmo banco: duas chamadas que caissem na mesma conta com CPFs
-        diferentes bateriam na regra de divergencia de dados (422). Quem
-        quer a MESMA conta em dois Pix copia o bloco da conta do primeiro.
-        """
         if pix_id is None:
-            # "pix-" + 12 hexadecimais = 16 caracteres, o limite do id.
             pix_id = f"pix-{uuid4().hex[:12]}"
 
         if source_document_number is None:

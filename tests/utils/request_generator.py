@@ -4,6 +4,7 @@ from tests.utils.requisition import ClientRequisition, BaseConnectorResponse
 
 
 INTERNAL_TOKEN = environ.get("INTERNAL_TOKEN", "default_token")
+BANK_ISPB = environ.get("BANK_ISPB", "32402502")
 
 
 class RequestGenerator:
@@ -27,10 +28,11 @@ class RequestGenerator:
         return response.response_status, response.response_json
 
     @staticmethod
-    def POST_unblock_account(account_id) -> BaseConnectorResponse:
+    def POST_unblock_account(participant: str, branch: str, account_number: str) -> BaseConnectorResponse:
         response = ClientRequisition.send(
             "POST",
-            f"/admin/accounts/{account_id}/unblock",
+            "/admin/accounts/unblock",
+            payload={"participant": participant, "branch": branch, "account_number": account_number},
             headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
         )
         return response.response_status, response.response_json

@@ -2,12 +2,6 @@ from models import PixTransaction
 
 
 class PixTransactionDTO:
-    """Traduz um Pix gravado na resposta do contrato: `key`, `status`, `metadata`.
-
-    O POST e o GET passam os dois por aqui, e é isso que garante que a
-    análise devolvida na hora e a consultada depois nunca divergem.
-    """
-
     @staticmethod
     def obj_to_dict(pix_transaction: PixTransaction) -> dict:
         metadata = {}

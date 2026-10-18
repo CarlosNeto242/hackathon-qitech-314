@@ -1,0 +1,22 @@
+{
+  "title": "PostUnblockAccount",
+  "type": "object",
+  "properties": {
+    "participant": {
+      "type": "string",
+      "pattern": "^\\d{8}$"
+    },
+    "branch": {
+      "$ref": "pix_definitions.json#/definitions/branch"
+    },
+    "account_number": {
+      "$ref": "pix_definitions.json#/definitions/account_number"
+    }
+  },
+  "required": [
+    "participant",
+    "branch",
+    "account_number"
+  ],
+  "additionalProperties": false
+}
