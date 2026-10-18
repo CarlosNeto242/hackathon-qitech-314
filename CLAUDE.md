@@ -124,7 +124,7 @@ Tabelas: `account`, `transaction`, `events`. Definição exata em `database/data
 ### Regras de comportamento do banco
 
 - **Idempotência:** `pix_id` é único. Pix repetido com o mesmo conteúdo (mesmo `payload_hash`) devolve a análise
-  gravada (200); com outro conteúdo é conflito (409, `QIT002008`), nunca a análise de outra transação. A violação de unicidade em corrida
+  gravada (200); com outro conteúdo é conflito (409, `QIT001014`), nunca a análise de outra transação. A violação de unicidade em corrida
   é tratada como "já existe", nunca como 500.
 - **Conta nova:** `INSERT ... ON CONFLICT DO NOTHING`. Nunca sobrescreve `opening_date` nem `document_number`.
 - **Participant da origem:** sempre a constante `BANK_ISPB` (padrão `32402502`, **a confirmar**), ignorando o payload.

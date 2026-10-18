@@ -19,7 +19,7 @@ class TestAdminUnblock:
         )
 
         assert status == 404
-        assert response["code"] == "QIT002006"
+        assert response["code"] == "QIT001012"
 
     def test_refuses_invalid_payload(self):
         for participant, branch, account_number in (("123", "0001", "1"), (BANK_ISPB, "ag-01", "1")):
@@ -35,4 +35,4 @@ class TestAdminUnblock:
         status, response = PixJourney.unblock_source(payload)
 
         assert status == 409
-        assert response["code"] == "QIT002007"
+        assert response["code"] == "QIT001013"

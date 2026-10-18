@@ -16,4 +16,4 @@ class TestPixTransactionGet:
         status, response = RequestGenerator.GET_pix_transaction("pix-que-nunca-existiu")
 
         assert status == 404
-        assert response["code"] == "QIT002001"
+        assert response["code"] == "QIT001008"

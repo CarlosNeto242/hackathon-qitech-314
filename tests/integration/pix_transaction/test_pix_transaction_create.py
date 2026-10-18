@@ -177,7 +177,7 @@ class TestPixTransactionImpossibleValues:
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
             assert status == 422, f"aceitou 30 de fevereiro em {'.'.join(field_path)}"
-            assert response["code"] == "QIT002003"
+            assert response["code"] == "QIT001010"
 
     def test_refuses_invalid_ip(self):
         for ip in ("999.1.1.1", "nao-e-ip", "", "1.2.3"):
@@ -205,7 +205,7 @@ class TestPixTransactionImpossibleValues:
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
             assert status == 422, f"aceitou CPF inválido em {role}"
-            assert response["code"] == "QIT002002"
+            assert response["code"] == "QIT001009"
 
     def test_refuses_invalid_cnpj_check_digits(self):
         for document in ("11.222.333/0001-80", "11111111111111"):
@@ -214,7 +214,7 @@ class TestPixTransactionImpossibleValues:
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
             assert status == 422, f"aceitou o CNPJ {document}"
-            assert response["code"] == "QIT002002"
+            assert response["code"] == "QIT001009"
 
     def test_invalid_pix_is_not_recorded(self):
         payload = PayloadGenerator.create_pix_transaction_payload()
@@ -273,7 +273,7 @@ class TestPixTransactionAccountData:
 
             status, response = RequestGenerator.POST_pix_transaction(second_payload)
             assert status == 422, f"aceitou divergência em {'.'.join(field_path)}"
-            assert response["code"] == "QIT002005"
+            assert response["code"] == "QIT001011"
 
             status, _response = RequestGenerator.GET_pix_transaction(second_payload["id"])
             assert status == 404
@@ -291,4 +291,4 @@ class TestPixTransactionAccountData:
 
         status, response = RequestGenerator.POST_pix_transaction(second_payload)
         assert status == 422
-        assert response["code"] == "QIT002005"
+        assert response["code"] == "QIT001011"
