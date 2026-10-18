@@ -1,0 +1,135 @@
+{
+  "title": "PostPixTransaction",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16
+    },
+    "amount": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "transaction_date": {
+      "$ref": "pix_definitions.json#/definitions/datetime_with_timezone"
+    },
+    "source_account": {
+      "type": "object",
+      "properties": {
+        "participant": {
+          "type": "string",
+          "pattern": "^\\d{8}$"
+        },
+        "branch": {
+          "$ref": "pix_definitions.json#/definitions/branch"
+        },
+        "account_number": {
+          "$ref": "pix_definitions.json#/definitions/account_number"
+        },
+        "opening_date": {
+          "$ref": "pix_definitions.json#/definitions/datetime_with_timezone"
+        },
+        "owner": {
+          "$ref": "pix_definitions.json#/definitions/owner"
+        }
+      },
+      "required": [
+        "branch",
+        "account_number",
+        "opening_date",
+        "owner"
+      ],
+      "additionalProperties": false
+    },
+    "destination_account": {
+      "type": "object",
+      "properties": {
+        "participant": {
+          "type": "string",
+          "pattern": "^\\d{8}$"
+        },
+        "branch": {
+          "$ref": "pix_definitions.json#/definitions/branch"
+        },
+        "account_number": {
+          "$ref": "pix_definitions.json#/definitions/account_number"
+        },
+        "opening_date": {
+          "$ref": "pix_definitions.json#/definitions/datetime_with_timezone"
+        },
+        "owner": {
+          "$ref": "pix_definitions.json#/definitions/owner"
+        }
+      },
+      "required": [
+        "participant",
+        "branch",
+        "account_number",
+        "opening_date",
+        "owner"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "channel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "ip": {
+          "type": "string",
+          "anyOf": [
+            { "format": "ipv4" },
+            { "format": "ipv6" }
+          ]
+        },
+        "geolocation": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "latitude": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "longitude": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          },
+          "required": [
+            "latitude",
+            "longitude"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "device_id",
+        "channel",
+        "ip"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "amount",
+    "transaction_date",
+    "source_account",
+    "destination_account",
+    "source"
+  ],
+  "additionalProperties": false
+}

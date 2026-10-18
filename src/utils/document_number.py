@@ -6,8 +6,8 @@ CHECK_DIGIT_POSITIONS = [9, 10]
 def is_valid_cpf(document_number: str) -> bool:
     """Diz se um CPF existe de verdade — não se ele tem a cara certa.
 
-    O schema em src/schemas/post_sample_entity.json já cobrou o formato:
-    três pontos, um hífen, onze dígitos. Isto aqui é outra pergunta, e a
+    O schema em src/schemas/pix_definitions.json já cobrou o formato:
+    onze dígitos, com ou sem a máscara. Isto aqui é outra pergunta, e a
     diferença entre as duas é a lição deste arquivo.
 
     Os dois últimos dígitos de um CPF não são escolhidos: eles são o
@@ -62,3 +62,56 @@ def is_valid_cpf(document_number: str) -> bool:
             return False
 
     return True
+
+
+CNPJ_LENGTH = 14
+
+# Os pesos de cada dígito verificador do CNPJ: o primeiro olha os doze
+# dígitos da frente, o segundo olha os treze.
+CNPJ_FIRST_WEIGHTS = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+CNPJ_SECOND_WEIGHTS = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+
+
+def only_digits(document_number: str) -> str:
+    """O documento como o banco guarda: só os dígitos, sem ponto, barra ou hífen."""
+    return "".join(character for character in document_number if character.isdigit())
+
+
+def is_valid_cnpj(document_number: str) -> bool:
+    """A mesma pergunta do is_valid_cpf, para empresa: os dois últimos
+    dígitos batem com a conta feita sobre os doze primeiros?"""
+    digits = [int(character) for character in only_digits(document_number)]
+
+    if len(digits) != CNPJ_LENGTH:
+        return False
+
+    if len(set(digits)) == 1:
+        return False
+
+    for weights in (CNPJ_FIRST_WEIGHTS, CNPJ_SECOND_WEIGHTS):
+        position = len(weights)
+        total = sum(digit * weight for digit, weight in zip(digits, weights))
+        remainder = total % 11
+
+        if remainder < 2:
+            expected_digit = 0
+        else:
+            expected_digit = 11 - remainder
+
+        if digits[position] != expected_digit:
+            return False
+
+    return True
+
+
+def is_valid_document(document_number: str) -> bool:
+    """CPF ou CNPJ, decidido pela quantidade de dígitos (11 ou 14)."""
+    digits = only_digits(document_number)
+
+    if len(digits) == CPF_LENGTH:
+        return is_valid_cpf(digits)
+
+    if len(digits) == CNPJ_LENGTH:
+        return is_valid_cnpj(digits)
+
+    return False
