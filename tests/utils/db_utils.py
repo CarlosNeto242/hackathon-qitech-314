@@ -1,7 +1,7 @@
 from os import environ
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
 
 
@@ -41,7 +41,7 @@ class DbUtils:
     depender de QUANTAS linhas existem no banco — contar, listar,
     paginar, filtrar. Nesses casos `DbUtils.rollback()` é a primeira
     linha do teste, antes de criar qualquer coisa (o exemplo está em
-    `tests/integration/test_sample_entities.py`). Um teste que só olha
+    `tests/integration/pix_transaction/test_admin_unblock.py`). Um teste que só olha
     as entidades que ele mesmo criou, pela chave que recebeu de volta,
     não precisa de limpeza nenhuma — e fica mais rápido sem ela.
 
@@ -63,7 +63,50 @@ class DbUtils:
                 for query in RESET_QUERIES:
                     connection.exec_driver_sql(query)
 
-                connection.exec_driver_sql(SCHEMA_FILE.read_text())
+                connection.exec_driver_sql(SCHEMA_FILE.read_text(encoding="utf-8"))
+        except OperationalError:
+            message = DATABASE_OFFLINE.format(host=engine.url.host, port=engine.url.port)
+            raise RuntimeError(message) from None
+        finally:
+            engine.dispose()
+
+    @staticmethod
+    def block_account(branch: str, account_number: str) -> int:
+        """Bloqueia uma conta direto no banco e devolve o id dela.
+
+        É uma exceção à regra de montar cenário só pela API, e ela tem
+        prazo: hoje nenhuma rota bloqueia conta, porque o bloqueio só vai
+        nascer da reincidência. Quando ela existir, os testes passam a
+        bloquear repetindo Pix rejeitados, e este método pode sair.
+        """
+        rows = DbUtils._execute(
+            "UPDATE account SET status = 'PROHIBITED' "
+            "WHERE branch = :branch AND account_number = :account_number RETURNING id",
+            {"branch": branch, "account_number": account_number},
+        )
+        assert len(rows) == 1, f"esperava uma conta {branch}/{account_number}, achei {len(rows)}"
+        return rows[0].id
+
+    @staticmethod
+    def account_events(account_id: int) -> list:
+        """Os eventos de status da conta, do mais antigo pro mais novo.
+
+        A API não expõe a tabela events, então é por aqui que o teste
+        confere que o desbloqueio deixou o rastro certo.
+        """
+        return DbUtils._execute(
+            "SELECT from_status, to_status, reason, transaction_id FROM events "
+            "WHERE account_id = :account_id ORDER BY created_at, id",
+            {"account_id": account_id},
+        )
+
+    @staticmethod
+    def _execute(query: str, params: dict) -> list:
+        engine = create_engine(DbUtils.database_url(), isolation_level="AUTOCOMMIT")
+
+        try:
+            with engine.connect() as connection:
+                return connection.execute(text(query), params).fetchall()
         except OperationalError:
             message = DATABASE_OFFLINE.format(host=engine.url.host, port=engine.url.port)
             raise RuntimeError(message) from None

@@ -28,3 +28,7 @@ class RandomGenerator:
         )
 
         return cnpj_number
+
+    @staticmethod
+    def generate_account_number():
+        return str(random.randint(10_000_000, 99_999_999))

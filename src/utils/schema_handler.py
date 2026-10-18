@@ -2,10 +2,17 @@ import functools
 import json
 import os
 
-from jsonschema import RefResolver, ValidationError, validate
+from jsonschema import FormatChecker, RefResolver, ValidationError, validate
 
 from constants import SCHEMA_PATH
 from errors import InvalidSchema
+
+
+# Por padrão, o "format" do JSON Schema é só anotação: a biblioteca não
+# confere nada. Este checker faz valer APENAS os formatos listados; qualquer
+# outro "format" continua sendo anotação. ipv4 e ipv6 usam o módulo
+# ipaddress do Python e não dependem de pacote extra.
+FORMAT_CHECKER = FormatChecker(formats=["ipv4", "ipv6"])
 
 
 class SchemaCache:
@@ -81,8 +88,8 @@ class SchemaHandler:
 
         Usa-se assim, no método do resource que recebe corpo:
 
-            class SampleEntityResource:
-                @SchemaHandler.validate("post_sample_entity.json")
+            class PixTransactionResource:
+                @SchemaHandler.validate("post_pix_transaction.json")
                 def on_post(self, payload: dict) -> dict:
 
         O nome do arquivo é o único argumento, e ele aponta pra dentro
@@ -90,7 +97,7 @@ class SchemaHandler:
         DELETE — não leva decorator nenhum: não há o que conferir.
 
         Repare que o endereço HTTP não aparece aqui. Quem liga
-        "/sample_entity" a este método é o src/app.py, e é de propósito:
+        "/pix/transaction" a este método é o src/app.py, e é de propósito:
         o resource cuida do CONTEÚDO da requisição, o app.py cuida do
         ENDEREÇO dela.
         """
@@ -108,7 +115,7 @@ class SchemaHandler:
                 resolver = RefResolver(f"file://{SCHEMA_PATH}/", None)
 
                 try:
-                    validate(kwargs["payload"], schema, resolver=resolver)
+                    validate(kwargs["payload"], schema, resolver=resolver, format_checker=FORMAT_CHECKER)
                 except ValidationError as error:
                     raise InvalidSchema(describe_schema_error(error))
 
@@ -124,8 +131,8 @@ class SchemaHandler:
 
         Usa-se assim, num metodo que recebe a requisicao inteira:
 
-            class SampleEntityResource:
-                @SchemaHandler.validate_query_params("get_sample_entities.json")
+            class ListResource:
+                @SchemaHandler.validate_query_params("get_list.json")
                 def on_get_list(self, request: Request) -> JSONResponse:
 
         Por que ler do `request` em vez dos argumentos da funcao: o
@@ -157,7 +164,7 @@ class SchemaHandler:
                 query_params = query_params_to_dict(request.query_params, schema)
 
                 try:
-                    validate(query_params, schema, resolver=resolver)
+                    validate(query_params, schema, resolver=resolver, format_checker=FORMAT_CHECKER)
                 except ValidationError as error:
                     raise InvalidSchema(describe_schema_error(error))
 

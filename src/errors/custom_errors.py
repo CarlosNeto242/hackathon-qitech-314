@@ -1,101 +1,87 @@
 from errors import QIException
 
 
-class NotFoundSampleEntity(QIException):
-    code = "QIT001001"
+# ─────────────────────────────────────────────────────────────────────
+# Antifraude Pix (QIT002xxx)
+# ─────────────────────────────────────────────────────────────────────
 
-    def __init__(self, sample_entity_key) -> None:
-        title = "Entity not Found"
+
+class NotFoundPixTransaction(QIException):
+    code = "QIT002001"
+
+    def __init__(self, pix_id) -> None:
+        title = "Pix Transaction not Found"
         http_status = 404
-        description = f"Entity with key {sample_entity_key} was not found."
-        translation = f"A entidade com chave {sample_entity_key} não foi encontrada."
+        description = f"Pix transaction with id {pix_id} was not found."
+        translation = f"O Pix com id {pix_id} não foi encontrado."
         super().__init__(title, self.code, http_status, description, translation)
 
 
-class SampleEntityFinalStatus(QIException):
-    code = "QIT001002"
+class InvalidPixDocumentNumber(QIException):
+    """CPF ou CNPJ com o formato certo e os dígitos verificadores errados.
 
-    def __init__(self, old_status, new_status) -> None:
-        title = "Entity cannot change status"
-        http_status = 409
-        description = f"Entity with status {old_status} cannot update to {new_status}."
-        translation = "Essa entidade não pode ser atualizada."
-        super().__init__(title, self.code, http_status, description, translation)
-
-
-class InvalidDocumentNumber(QIException):
-    """O CPF tem o formato certo e não existe.
-
-    422, e não 400, de propósito: 400 quer dizer "não consegui ler o seu
-    pedido". Aqui a API leu, entendeu, e o valor é que não pode existir —
-    os dois últimos dígitos não batem com a conta. A diferença está
-    explicada em src/utils/document_number.py.
+    Mesma lógica do InvalidDocumentNumber: 422, não 400. Diz o CAMPO, e
+    não o número, porque o número é dado pessoal e não volta na resposta.
     """
 
-    code = "QIT001003"
+    code = "QIT002002"
 
-    def __init__(self, document_number) -> None:
+    def __init__(self, field) -> None:
         title = "Invalid Document Number"
         http_status = 422
-        description = f"The document number {document_number} is not a valid CPF."
-        translation = "O CPF informado não é válido."
+        description = f"The document number in {field} is not a valid CPF or CNPJ."
+        translation = "O CPF/CNPJ informado não é válido."
         super().__init__(title, self.code, http_status, description, translation)
 
 
-class DuplicatedDocumentNumber(QIException):
-    """Já existe um cadastro com este CPF.
+class InvalidDateTime(QIException):
+    """Data com o formato certo que não existe no calendário (ex.: dia 30 de fevereiro)."""
 
-    409 Conflict: o pedido está correto em si, e o que impede é o que já
-    está no banco. É a mesma família do SampleEntityFinalStatus aqui em
-    cima — conflito com o que já existe, não erro de quem pediu.
+    code = "QIT002003"
+
+    def __init__(self, field) -> None:
+        title = "Invalid Date Time"
+        http_status = 422
+        description = f"The value in {field} is not a real date and time."
+        translation = "A data informada não existe."
+        super().__init__(title, self.code, http_status, description, translation)
+
+
+class AccountDataMismatch(QIException):
+    """A conta já existe com outro documento ou outra data de abertura.
+
+    A mensagem é genérica DE PROPÓSITO: não diz qual conta nem qual campo
+    divergiu, pra que a resposta não sirva de oráculo a quem testa
+    combinações de conta e documento. O detalhe fica no log.
     """
 
-    code = "QIT001004"
+    code = "QIT002005"
 
-    def __init__(self, document_number) -> None:
-        title = "Document Number already registered"
-        http_status = 409
-        description = f"There is already an entity with the document number {document_number}."
-        translation = "Já existe um cadastro com este CPF."
-        super().__init__(title, self.code, http_status, description, translation)
-
-
-class DuplicatedEmail(QIException):
-    code = "QIT001005"
-
-    def __init__(self, email) -> None:
-        title = "Email already registered"
-        http_status = 409
-        description = f"There is already an entity with the email {email}."
-        translation = "Já existe um cadastro com este e-mail."
-        super().__init__(title, self.code, http_status, description, translation)
-
-
-class UnderageSampleEntity(QIException):
-    code = "QIT001006"
-
-    def __init__(self, age, minimum_age) -> None:
-        title = "Entity is underage"
+    def __init__(self) -> None:
+        title = "Account Data Mismatch"
         http_status = 422
-        description = f"The entity is {age} years old, and the minimum is {minimum_age}."
-        translation = f"É preciso ter pelo menos {minimum_age} anos."
+        description = "The account data does not match the registered account."
+        translation = "Os dados da conta não conferem com o cadastro."
         super().__init__(title, self.code, http_status, description, translation)
 
 
-class InvalidBirthdate(QIException):
-    """A data tem o formato certo e não existe no calendário.
+class NotFoundAccount(QIException):
+    code = "QIT002006"
 
-    Existe porque o `pattern` do schema sabe contar dígitos, não dias:
-    "2025-02-30" e "9999-99-99" passam pelo regex e morrem no
-    `date.fromisoformat`. Sem esta classe, esse ValueError virava 500 —
-    a API culpando a si mesma por um erro de quem chamou.
-    """
+    def __init__(self, account_id) -> None:
+        title = "Account not Found"
+        http_status = 404
+        description = f"Account with id {account_id} was not found."
+        translation = f"A conta com id {account_id} não foi encontrada."
+        super().__init__(title, self.code, http_status, description, translation)
 
-    code = "QIT001007"
 
-    def __init__(self, birthdate) -> None:
-        title = "Invalid Birthdate"
-        http_status = 422
-        description = f"The birthdate {birthdate} is not a real date."
-        translation = "A data de nascimento informada não existe."
+class AccountAlreadyPermitted(QIException):
+    code = "QIT002007"
+
+    def __init__(self, account_id) -> None:
+        title = "Account already permitted"
+        http_status = 409
+        description = f"Account with id {account_id} is not blocked."
+        translation = "Essa conta não está bloqueada."
         super().__init__(title, self.code, http_status, description, translation)
