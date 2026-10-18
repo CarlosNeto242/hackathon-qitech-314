@@ -1,17 +1,3 @@
-"""Mock do DICT do Banco Central: a consulta antifraude de pessoa.
-
-Responde GET /dict/{document_number}/statistics com os contadores de
-marcações de fraude, no formato do DICT real (em JSON, não XML). Alguns
-documentos têm comportamento fixo, pra testes e demonstração:
-
-    11144477735  marcado como conta laranja nos últimos 90 dias
-    22255588846  responde devagar (passa do timeout do motor)
-    33366699957  responde 500
-    qualquer outro: sem nenhuma marcação
-
-Só biblioteca padrão do Python: não precisa instalar nada.
-"""
-
 import json
 import re
 import time
@@ -81,7 +67,6 @@ class DictHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(content)
         except (BrokenPipeError, ConnectionResetError):
-            # O motor desistiu antes (timeout): não há mais pra quem responder.
             pass
 
 

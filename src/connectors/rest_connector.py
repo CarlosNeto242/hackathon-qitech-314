@@ -8,7 +8,6 @@ from utils.logger import get_logger
 
 
 class RestConnector(metaclass=ABCMeta):
-
     def __init__(self, class_name: str, base_url: str, timeout: int, internal_token: str) -> None:
         self.logger = get_logger(class_name)
         self.base_url = base_url
@@ -41,7 +40,6 @@ class RestConnector(metaclass=ABCMeta):
 
 
 class BaseConnectorResponse:
-
     def __init__(self, endpoint: str, method: str, response: requests.Response) -> None:
         self.endpoint = endpoint
         self.method = method

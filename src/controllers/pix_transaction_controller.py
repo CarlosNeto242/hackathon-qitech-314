@@ -1,6 +1,3 @@
-# O motor antifraude: recebe um Pix, decide e grava. O fluxo de decisão está
-# descrito no CLAUDE.md (seção 4); todos os números moram em src/parameters.py.
-
 import hashlib
 import json
 import math
@@ -30,7 +27,7 @@ PIX_ID_UNIQUE_CONSTRAINT = "transaction_pix_id_key"
 DESTINATION = "destination"
 SOURCE = "source"
 
-# Um sinal é (decisão, motivo). A decisão final é a mais grave entre eles.
+
 Signal = Tuple[str, str]
 
 SEVERITY = {
@@ -43,7 +40,6 @@ EARTH_RADIUS_KM = 6371
 
 
 class PixTransactionController(BaseController):
-
     def __init__(self) -> None:
         super().__init__(__name__)
         self.account_repository = AccountRepository(self.context)
@@ -51,7 +47,6 @@ class PixTransactionController(BaseController):
         self.dict_connector = DictConnector()
 
     def analyze(self, payload: dict) -> Tuple[dict, bool]:
-
         pix_id = payload["id"]
         payload_hash = self._fingerprint(payload)
 
@@ -85,14 +80,8 @@ class PixTransactionController(BaseController):
             "longitude": geolocation.get("longitude"),
         }
 
-        # Trava as duas contas até o commit. Sem isso, Pix simultâneos para a
-        # mesma conta não se enxergam (nenhum gravou ainda) e as contagens de
-        # velocidade dariam zero justamente na rajada de vários Pix por
-        # segundo. Só serializa Pix da MESMA conta; contas diferentes seguem
-        # em paralelo.
         self.account_repository.lock_accounts([source_account.id, destination_account.id])
-        # Destino CPF conta os recebimentos pelo documento (todas as contas do
-        # CPF), então a fila também precisa ser pelo documento.
+
         if len(destination_account.document_number) == CPF_LENGTH:
             self.account_repository.lock_document(destination_account.document_number)
 
@@ -101,10 +90,6 @@ class PixTransactionController(BaseController):
         pix_transaction = self.pix_transaction_repository.create(transaction_data, status, decision_reasons)
 
         try:
-            # O flush grava a transação antes do commit, pra que ela
-            # já tenha id (o evento de bloqueio aponta pra ela) e pra que a
-            # contagem da reincidência já a inclua. A corrida do pix_id passa
-            # a estourar aqui, por isso o flush está dentro do try.
             self.session.flush()
 
             if rejected_by == DESTINATION:
@@ -124,8 +109,6 @@ class PixTransactionController(BaseController):
         return PixTransactionDTO.obj_to_dict(pix_transaction), True
 
     def _recorded_analysis(self, existing: PixTransaction, payload_hash: str) -> dict:
-        """Idempotência: o mesmo Pix de novo devolve a análise gravada. O mesmo
-        id com OUTRO conteúdo é conflito, nunca a análise de outra transação."""
         if existing.payload_hash != payload_hash:
             self.logger.warning(f"pix_id {existing.pix_id} reenviado com outro conteudo")
             raise PixIdConflict(existing.pix_id)
@@ -133,8 +116,6 @@ class PixTransactionController(BaseController):
         return PixTransactionDTO.obj_to_dict(existing)
 
     def _fingerprint(self, payload: dict) -> str:
-        """SHA-256 do payload em forma canônica (chaves em ordem, sem espaços).
-        Um reenvio idêntico gera o mesmo hash; qualquer campo diferente, outro."""
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -145,17 +126,9 @@ class PixTransactionController(BaseController):
 
         return PixTransactionDTO.obj_to_dict(pix_transaction)
 
-    # ─── Decisão ──────────────────────────────────────────────────────────
-
     def _decide(
         self, source_account: Account, destination_account: Account, pix: dict
     ) -> Tuple[str, List[str], Optional[str]]:
-        """Devolve (status, motivos, papel que rejeitou ou None).
-
-        Cada regra acrescenta um sinal (decisão, motivo) em `signals`. No fim,
-        vale a decisão mais grave (ver _combine).
-        """
-
         if Account.PROHIBITED in (source_account.status, destination_account.status):
             return PixTransaction.REJECTED, [PixTransaction.ACCOUNT_BLOCKED], None
 
@@ -163,20 +136,13 @@ class PixTransactionController(BaseController):
         repository = self.pix_transaction_repository
         signals: List[Signal] = []
 
-        # ═══ VERIFICAÇÃO DO DESTINO ═══════════════════════════════════════
-
         destination = destination_account
         destination_age = now - destination.opening_date
 
-        # Consulta o DICT pelo documento; marcação de fraude já rejeita.
         if self._dict_fraud_marked(destination.document_number):
             return PixTransaction.REJECTED, [PixTransaction.DEST_FRAUD_MARKED], DESTINATION
 
         if len(destination.document_number) == CPF_LENGTH:
-            # ─── CASE CPF ───
-
-            # Conta recém-criada recebendo de muitas contas distintas.
-            # Conta contas pagadoras DISTINTAS (como na RFC), contando a deste Pix.
             if destination_age < timedelta(days=p.DEST_CPF_NEW_ACCOUNT_DAYS):
                 payers = repository.count_distinct_payers(destination.id, source_account.id) + 1
 
@@ -185,13 +151,6 @@ class PixTransactionController(BaseController):
                 elif payers > p.DEST_CPF_NEW_ACCOUNT_PAYERS_2FA:
                     signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.DEST_NEW_ACCOUNT))
 
-            # Frequência de recebimento, em três janelas: vários Pix no mesmo
-            # segundo (rajada), muitos no mesmo minuto e muitos na mesma hora
-            # (o laranja paciente). Contadas pelo DOCUMENTO: o laranja com
-            # várias contas não escapa espalhando os recebimentos.
-            # Contagem numa janela, e não o intervalo entre dois recebimentos:
-            # o intervalo depende de pagadores independentes (puniria o segundo
-            # de dois pagadores legítimos).
             windows = (
                 (timedelta(seconds=p.DEST_CPF_BURST_WINDOW_SECONDS), p.DEST_CPF_BURST_MAX),
                 (timedelta(minutes=p.DEST_CPF_VELOCITY_WINDOW_MINUTES), p.DEST_CPF_VELOCITY_MAX),
@@ -204,17 +163,12 @@ class PixTransactionController(BaseController):
                     break
 
         else:
-            # ─── CASE CNPJ ───
-            # Montante = soma recebida nas últimas 24 h, contando este Pix.
             window_start = now - timedelta(hours=p.DEST_CNPJ_AMOUNT_WINDOW_HOURS)
             window_sum = repository.sum_received_between(destination.id, window_start, now) + pix["amount"]
 
             if destination_age < timedelta(days=p.DEST_CNPJ_NEW_ACCOUNT_DAYS):
-                # Conta recente com alto montante.
                 limit = p.DEST_CNPJ_NEW_ACCOUNT_AMOUNT_LIMIT
             else:
-                # Conta não recente com montante acima do normal: compara com a
-                # média diária dos 30 dias anteriores. Sem histórico, limite fixo.
                 history_start = window_start - timedelta(days=p.DEST_CNPJ_HISTORY_DAYS)
                 history_count = repository.count_received_between(destination.id, history_start, window_start)
 
@@ -227,43 +181,29 @@ class PixTransactionController(BaseController):
             if window_sum > limit:
                 signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.DEST_HIGH_AMOUNT))
 
-        # Rejeição no destino encerra o fluxo; 2FA no destino segue pra origem.
         if any(decision == PixTransaction.REJECTED for decision, _reason in signals):
             status, reasons = self._combine(signals)
             return status, reasons, DESTINATION
 
-        # ═══ VERIFICAÇÃO DA ORIGEM ════════════════════════════════════════
-
         source = source_account
         source_is_cpf = len(source.document_number) == CPF_LENGTH
 
-        # ─── Valor: só acima do limite olha o histórico ───
-        # Limites em CENTAVOS, como o amount.
         amount_limit = p.SRC_CPF_AMOUNT_LIMIT if source_is_cpf else p.SRC_CNPJ_AMOUNT_LIMIT
 
         if pix["amount"] > amount_limit:
             history_since = now - timedelta(days=p.SRC_HISTORY_WINDOW_DAYS)
             old_enough = now - source.opening_date >= timedelta(days=p.SRC_HISTORY_MIN_ACCOUNT_AGE_DAYS)
-            # Conta aprovados E 2FA, com a mesma premissa do aparelho reconhecido
-            # (o 2FA foi cumprido). Só com aprovados seria circular: um cliente
-            # cujos Pix grandes sempre pedem 2FA nunca formaria histórico.
+
             accepted = repository.count_accepted_sent_since(source.id, history_since)
 
             if not old_enough or accepted < p.SRC_HISTORY_MIN_TRANSACTIONS:
-                # Sem histórico → 2FA.
                 signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.SRC_HIGH_AMOUNT))
             else:
-                # Com histórico → acima de 1,5x o percentil 95 → 2FA.
-                # Percentil 95, e não a média dos 5% mais altos: com poucas
-                # transações, os 5% mais altos são um ou dois Pix só.
                 p95 = repository.accepted_sent_amount_percentile(source.id, history_since, p.SRC_AMOUNT_PERCENTILE)
                 if pix["amount"] > p.SRC_AMOUNT_FACTOR * p95:
                     signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.SRC_HIGH_AMOUNT))
 
-        # ─── Velocidade de envio ───
         if source_is_cpf:
-            # Contagem numa janela, e não o intervalo entre dois envios (mais
-            # robusta a script e retentativa).
             since = now - timedelta(minutes=p.SRC_CPF_VELOCITY_WINDOW_MINUTES)
             sent = repository.count_sent_between(source.id, since, now) + 1
 
@@ -272,8 +212,6 @@ class PixTransactionController(BaseController):
             elif sent > p.SRC_CPF_VELOCITY_2FA:
                 signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.SRC_SENDING_VELOCITY))
         else:
-            # Rajada relativa ao histórico, com piso pra média minúscula não
-            # disparar com 1 Pix.
             window_start = now - timedelta(hours=p.SRC_CNPJ_BURST_WINDOW_HOURS)
             sent = repository.count_sent_between(source.id, window_start, now) + 1
 
@@ -289,14 +227,9 @@ class PixTransactionController(BaseController):
             if sent > limit:
                 signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.SRC_SENDING_VELOCITY))
 
-        # ─── Dispositivo nunca usado antes na conta (Pix aprovado ou com 2FA) ───
         if not repository.device_recognized(source.id, pix["device_id"]):
             signals.append((PixTransaction.TWO_FACTOR_REQUIRED, PixTransaction.SRC_NEW_DEVICE))
 
-        # ─── Localização muda drasticamente em pouco tempo ───
-        # No CNPJ, só compara com o mesmo dispositivo (empresa tem operadores
-        # em lugares diferentes). Sem localização, neste Pix ou no anterior,
-        # a regra não dispara.
         if pix["latitude"] is not None:
             device_filter = None if source_is_cpf else pix["device_id"]
             last = repository.last_located_sent(source.id, device_filter)
@@ -314,15 +247,7 @@ class PixTransactionController(BaseController):
         rejected_by = SOURCE if status == PixTransaction.REJECTED else None
         return status, reasons, rejected_by
 
-    # ─── DICT ─────────────────────────────────────────────────────────────
-
     def _dict_fraud_marked(self, document_number: str) -> bool:
-        """Soma das marcações d90. DICT fora do ar ou resposta fora do formato
-        esperado → segue sem ele (False), com aviso no log.
-
-        Ler o formato da resposta poderia morar no connector; está aqui junto
-        da regra que usa os contadores.
-        """
         try:
             response = self.dict_connector.get_person_statistics(document_number)
         except DictUnavailable:
@@ -341,16 +266,7 @@ class PixTransactionController(BaseController):
 
         return total >= p.DICT_FRAUD_MARKERS_MIN
 
-    # ─── Reincidência ─────────────────────────────────────────────────────
-
     def _apply_reincidence(self, account: Account, role: str, pix_transaction: PixTransaction) -> None:
-        """Conta as rejeições por risco nos últimos Pix da conta, no mesmo papel,
-        desde o último desbloqueio. Passou do limite → bloqueia e grava o evento.
-
-        A janela de 30 dias impede que rejeições antigas se acumulem. A origem
-        tem limite mais alto que o destino. A transação atual já foi gravada
-        pelo flush, então entra na contagem.
-        """
         now = datetime.now(timezone.utc)
         since = now - timedelta(days=p.REINCIDENCE_WINDOW_DAYS)
 
@@ -382,18 +298,12 @@ class PixTransactionController(BaseController):
         if rejections <= max_rejections:
             return
 
-        # Trava a linha antes de mudar, pra dois Pix simultâneos não gravarem
-        # dois eventos de bloqueio.
         locked = self.account_repository.get_by_id_for_update(account.id)
         if locked.status == Account.PERMITTED:
             self.account_repository.update_status(locked, Account.PROHIBITED, reason, pix_transaction.id)
             self.logger.info(f"Conta {account.id} bloqueada por reincidencia ({role}): {rejections} rejeicoes")
 
-    # ─── Auxiliares ───────────────────────────────────────────────────────
-
     def _combine(self, signals: List[Signal]) -> Tuple[str, List[str]]:
-        """Decisão mais grave; motivos de rejeição primeiro, depois os de 2FA,
-        cada grupo na ordem em que as regras rodaram, sem repetir."""
         if not signals:
             return PixTransaction.APPROVED, []
 
@@ -412,10 +322,7 @@ class PixTransactionController(BaseController):
         a = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
         return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
-    # ─── Validação e registro de contas (igual ao controller atual) ──────
-
     def _register_account(self, account_data: dict, field: str) -> Account:
-
         account = self.account_repository.get_or_create(account_data)
 
         divergent_fields = []
@@ -433,7 +340,6 @@ class PixTransactionController(BaseController):
         return account
 
     def _account_data(self, raw_account: dict, field: str, participant: str) -> dict:
-
         document_number = raw_account["owner"]["document_number"]
         if not is_valid_document(document_number):
             raise InvalidPixDocumentNumber(f"{field}.owner.document_number")

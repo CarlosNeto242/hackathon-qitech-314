@@ -4,26 +4,6 @@ CHECK_DIGIT_POSITIONS = [9, 10]
 
 
 def is_valid_cpf(document_number: str) -> bool:
-    """Diz se um CPF existe de verdade — não se ele tem a cara certa.
-
-    O schema em src/schemas/pix_definitions.json já cobrou o formato:
-    onze dígitos, com ou sem a máscara. Isto aqui é outra pergunta, e a
-    diferença entre as duas é a lição deste arquivo.
-
-    Os dois últimos dígitos de um CPF não são escolhidos: eles são o
-    RESULTADO de uma conta feita sobre os nove primeiros. Por isso um
-    número pode ter o formato perfeito e não existir — "111.222.333-44"
-    passa no schema e não passa aqui.
-
-    É o mesmo motivo pelo qual a resposta dessa recusa é 422 e não 400:
-    não é que a API não conseguiu ler o pedido; ela leu, entendeu, e o
-    valor não pode existir.
-
-    A conta, para cada um dos dois dígitos: multiplica cada dígito
-    anterior por um peso que decresce, soma tudo, tira o resto da divisão
-    por 11. Resto menor que 2 vira dígito 0; nos outros casos, o dígito é
-    11 menos o resto.
-    """
     digits = []
     for character in document_number:
         if character.isdigit():
@@ -32,9 +12,6 @@ def is_valid_cpf(document_number: str) -> bool:
     if len(digits) != CPF_LENGTH:
         return False
 
-    # Um CPF de dígitos todos iguais ("111.111.111-11") passa na conta
-    # dos dígitos verificadores e mesmo assim não vale. São onze números
-    # conhecidos, e a Receita não emite nenhum deles.
     all_digits_are_equal = True
     for digit in digits:
         if digit != digits[0]:
@@ -66,20 +43,16 @@ def is_valid_cpf(document_number: str) -> bool:
 
 CNPJ_LENGTH = 14
 
-# Os pesos de cada dígito verificador do CNPJ: o primeiro olha os doze
-# dígitos da frente, o segundo olha os treze.
+
 CNPJ_FIRST_WEIGHTS = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
 CNPJ_SECOND_WEIGHTS = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
 
 
 def only_digits(document_number: str) -> str:
-    """O documento como o banco guarda: só os dígitos, sem ponto, barra ou hífen."""
     return "".join(character for character in document_number if character.isdigit())
 
 
 def is_valid_cnpj(document_number: str) -> bool:
-    """A mesma pergunta do is_valid_cpf, para empresa: os dois últimos
-    dígitos batem com a conta feita sobre os doze primeiros?"""
     digits = [int(character) for character in only_digits(document_number)]
 
     if len(digits) != CNPJ_LENGTH:
@@ -105,7 +78,6 @@ def is_valid_cnpj(document_number: str) -> bool:
 
 
 def is_valid_document(document_number: str) -> bool:
-    """CPF ou CNPJ, decidido pela quantidade de dígitos (11 ou 14)."""
     digits = only_digits(document_number)
 
     if len(digits) == CPF_LENGTH:

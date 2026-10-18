@@ -9,7 +9,6 @@ from models import Account, PixTransaction
 
 
 class PixTransactionRepository:
-
     def __init__(self, context: Context) -> None:
         self.session = context.db_session
 
@@ -25,10 +24,7 @@ class PixTransactionRepository:
     def get_by_pix_id(self, pix_id: str) -> Optional[PixTransaction]:
         return self.session.query(PixTransaction).filter(PixTransaction.pix_id == pix_id).first()
 
-    # ─── Consultas das regras antifraude ─────────────────────────────────
-
     def count_received_by_document_since(self, document_number: str, since: datetime) -> int:
-        """Pix recebidos por TODAS as contas com este documento desde `since`."""
         return (
             self.session.query(func.count(PixTransaction.id))
             .join(Account, Account.id == PixTransaction.destination_account_id)
@@ -59,7 +55,6 @@ class PixTransactionRepository:
         )
 
     def count_distinct_payers(self, account_id: int, excluding_account_id: int) -> int:
-        """Contas distintas que já pagaram esta conta, sem contar `excluding_account_id`."""
         return (
             self.session.query(func.count(func.distinct(PixTransaction.source_account_id)))
             .filter(
@@ -81,7 +76,6 @@ class PixTransactionRepository:
         )
 
     def count_accepted_sent_since(self, account_id: int, since: datetime) -> int:
-        """Pix enviados aprovados ou com 2FA (premissa: o 2FA foi cumprido)."""
         return (
             self.session.query(func.count(PixTransaction.id))
             .filter(
@@ -93,7 +87,6 @@ class PixTransactionRepository:
         )
 
     def accepted_sent_amount_percentile(self, account_id: int, since: datetime, percentile: float) -> Optional[float]:
-        """Percentil dos valores dos Pix enviados aprovados ou com 2FA."""
         return (
             self.session.query(func.percentile_cont(percentile).within_group(PixTransaction.amount.asc()))
             .filter(
@@ -105,7 +98,6 @@ class PixTransactionRepository:
         )
 
     def device_recognized(self, account_id: int, device_id: str) -> bool:
-        """O aparelho já foi usado pela conta num Pix aprovado ou com 2FA."""
         return (
             self.session.query(PixTransaction.id)
             .filter(
@@ -118,12 +110,6 @@ class PixTransactionRepository:
         )
 
     def last_located_sent(self, account_id: int, device_id: Optional[str] = None) -> Optional[PixTransaction]:
-        """O último Pix aceito (aprovado ou com 2FA) da conta que tinha
-        localização; com `device_id`, só desse aparelho.
-
-        Rejeitado não entra: a localização de um Pix barrado (talvez do
-        fraudador) não pode virar a referência do próximo Pix do cliente.
-        """
         query = self.session.query(PixTransaction).filter(
             PixTransaction.source_account_id == account_id,
             PixTransaction.latitude.isnot(None),

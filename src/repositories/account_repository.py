@@ -9,12 +9,10 @@ from models import Account, AccountEvent
 
 
 class AccountRepository:
-
     def __init__(self, context: Context) -> None:
         self.session = context.db_session
 
     def get_or_create(self, account_data: dict) -> Account:
-
         statement = (
             insert(Account)
             .values(**account_data)
@@ -39,6 +37,18 @@ class AccountRepository:
             .first()
         )
 
+    def get_by_identity_for_update(self, participant: str, branch: str, account_number: str) -> Optional[Account]:
+        return (
+            self.session.query(Account)
+            .filter(
+                Account.participant == participant,
+                Account.branch == branch,
+                Account.account_number == account_number,
+            )
+            .with_for_update()
+            .first()
+        )
+
     def get_by_id_for_update(self, account_id: int) -> Optional[Account]:
         return self.session.query(Account).filter(Account.id == account_id).with_for_update().first()
 
@@ -60,7 +70,6 @@ class AccountRepository:
         self.session.add(event)
 
     def last_unblock_at(self, account_id: int) -> Optional[datetime]:
-        """Quando a conta foi desbloqueada pela última vez (None se nunca foi)."""
         return (
             self.session.query(func.max(AccountEvent.created_at))
             .filter(AccountEvent.account_id == account_id, AccountEvent.reason == AccountEvent.MANUAL_UNBLOCK)
@@ -68,12 +77,6 @@ class AccountRepository:
         )
 
     def lock_accounts(self, account_ids: List[int]) -> None:
-        """Trava as linhas das contas até o commit.
-
-        Sempre em ordem de id: duas análises que travam as mesmas duas contas
-        em ordem diferente (A paga B enquanto B paga A) poderiam esperar uma
-        pela outra pra sempre (deadlock).
-        """
         (
             self.session.query(Account.id)
             .filter(Account.id.in_(account_ids))
@@ -83,12 +86,6 @@ class AccountRepository:
         )
 
     def lock_document(self, document_number: str) -> None:
-        """Trava o DOCUMENTO até o commit (advisory lock do Postgres).
-
-        A trava das contas não basta quando a regra conta por documento: dois
-        Pix simultâneos para contas DIFERENTES do mesmo CPF não esperariam um
-        pelo outro, e cada um contaria sem enxergar o outro.
-        """
         self.session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:document_number))"),
             {"document_number": document_number},

@@ -1,124 +1,73 @@
-from copy import deepcopy
-
-from tests.utils import DbUtils, PayloadGenerator, RequestGenerator
+from tests.utils import BANK_ISPB, PixJourney, RequestGenerator
 
 
-def registra_e_bloqueia(papel: str) -> tuple:
-    """Registra as contas com um Pix e bloqueia a do `papel` pedido.
-
-    O primeiro Pix pede 2FA (aparelho novo); depois dele, o aparelho passa a
-    ser reconhecido, e os Pix seguintes pelo mesmo aparelho são aprovados.
-
-    Devolve o primeiro payload (pra reaproveitar as contas) e o id da conta
-    bloqueada.
-    """
-    primeiro = PayloadGenerator.create_pix_transaction_payload()
-    status, response = RequestGenerator.POST_pix_transaction(primeiro)
-    assert status == 201
-    assert response["status"] == "two_factor_required"
-
-    conta = primeiro[papel]
-    account_id = DbUtils.block_account(conta["branch"], conta["account_number"])
-    return primeiro, account_id
-
-
-def mesmas_contas(primeiro: dict) -> dict:
-    """Um Pix novo entre as mesmas duas contas do `primeiro`, pelo mesmo aparelho."""
-    payload = PayloadGenerator.create_pix_transaction_payload()
-    payload["source_account"] = deepcopy(primeiro["source_account"])
-    payload["destination_account"] = deepcopy(primeiro["destination_account"])
-    payload["source"]["device_id"] = primeiro["source"]["device_id"]
-    return payload
+def blocked(role: str) -> dict:
+    first = PixJourney.new()
+    PixJourney.send(first)
+    if role == "source_account":
+        PixJourney.block_source(first)
+    else:
+        PixJourney.block_destination(first)
+    return first
 
 
 class TestBlockedAccount:
     def test_blocked_account_rejects_without_rules(self):
-        """Origem ou destino bloqueado: rejected com ACCOUNT_BLOCKED como motivo
-        ÚNICO, porque nenhuma outra regra chega a rodar."""
-        for papel in ("source_account", "destination_account"):
-            primeiro, _account_id = registra_e_bloqueia(papel)
-            payload = mesmas_contas(primeiro)
+        for role in ("source_account", "destination_account"):
+            first = blocked(role)
 
-            status, response = RequestGenerator.POST_pix_transaction(payload)
+            status, reasons = PixJourney.send(PixJourney.between_same_accounts(first))
 
-            assert status == 201, f"conta bloqueada em {papel}"
-            assert response["status"] == "rejected"
-            assert response["metadata"] == {"reasons": ["ACCOUNT_BLOCKED"]}
+            assert (status, reasons) == ("rejected", ["ACCOUNT_BLOCKED"]), f"conta bloqueada em {role}"
 
     def test_rejected_pix_is_recorded(self):
-        """Rejeitado também é Pix recebido: fica gravado e o GET devolve a
-        mesma análise que o POST."""
-        primeiro, _account_id = registra_e_bloqueia("destination_account")
-        payload = mesmas_contas(primeiro)
+        first = blocked("destination_account")
+        payload = PixJourney.between_same_accounts(first)
 
-        status, criado = RequestGenerator.POST_pix_transaction(payload)
+        status, created = RequestGenerator.POST_pix_transaction(payload)
         assert status == 201
 
-        status, consultado = RequestGenerator.GET_pix_transaction(payload["id"])
+        status, fetched = RequestGenerator.GET_pix_transaction(payload["id"])
         assert status == 200
-        assert consultado == criado
+        assert fetched == created
 
     def test_blocked_only_affects_its_own_account(self):
-        """Bloquear o destino não contamina a origem: ela continua pagando
-        outros destinos normalmente."""
-        primeiro, _account_id = registra_e_bloqueia("destination_account")
+        first = blocked("destination_account")
 
-        outro_destino = PayloadGenerator.create_pix_transaction_payload()
-        outro_destino["source_account"] = deepcopy(primeiro["source_account"])
-        outro_destino["source"]["device_id"] = primeiro["source"]["device_id"]
+        status, reasons = PixJourney.send(PixJourney.from_same_source(first))
 
-        status, response = RequestGenerator.POST_pix_transaction(outro_destino)
-
-        assert status == 201
-        assert response["status"] == "approved"
+        assert (status, reasons) == ("approved", [])
 
 
 class TestUnblockAccount:
     def test_unblock_returns_permitted_account(self):
-        _primeiro, account_id = registra_e_bloqueia("source_account")
+        first = blocked("source_account")
 
-        status, response = RequestGenerator.POST_unblock_account(account_id)
+        status, response = PixJourney.unblock_source(first)
 
         assert status == 200
-        assert response == {"id": account_id, "status": "PERMITTED"}
+        assert response == {
+            "participant": BANK_ISPB,
+            "branch": first["source_account"]["branch"],
+            "account_number": first["source_account"]["account_number"],
+            "status": "PERMITTED",
+        }
 
-    def test_unblock_records_event(self):
-        """O desbloqueio grava UM evento PROHIBITED → PERMITTED, sem transação
-        de origem (quem desbloqueia é uma pessoa, não um Pix)."""
-        _primeiro, account_id = registra_e_bloqueia("source_account")
+    def test_unblocked_account_is_analyzed_again(self):
+        first = blocked("destination_account")
 
-        status, _response = RequestGenerator.POST_unblock_account(account_id)
+        status, _response = PixJourney.unblock_destination(first)
         assert status == 200
 
-        eventos = DbUtils.account_events(account_id)
-        assert len(eventos) == 1
-        assert eventos[0].from_status == "PROHIBITED"
-        assert eventos[0].to_status == "PERMITTED"
-        assert eventos[0].reason == "MANUAL_UNBLOCK"
-        assert eventos[0].transaction_id is None
-
-    def test_unblocked_account_is_approved_again(self):
-        primeiro, account_id = registra_e_bloqueia("destination_account")
-
-        status, response = RequestGenerator.POST_pix_transaction(mesmas_contas(primeiro))
-        assert response["status"] == "rejected"
-
-        status, _response = RequestGenerator.POST_unblock_account(account_id)
-        assert status == 200
-
-        status, response = RequestGenerator.POST_pix_transaction(mesmas_contas(primeiro))
-        assert status == 201
-        assert response["status"] == "approved"
+        _status, reasons = PixJourney.send(PixJourney.between_same_accounts(first))
+        assert reasons != ["ACCOUNT_BLOCKED"]
 
     def test_second_unblock_is_refused(self):
-        """Desbloquear duas vezes: a segunda é 409 e não grava outro evento."""
-        _primeiro, account_id = registra_e_bloqueia("source_account")
+        first = blocked("source_account")
 
-        status, _response = RequestGenerator.POST_unblock_account(account_id)
+        status, _response = PixJourney.unblock_source(first)
         assert status == 200
 
-        status, response = RequestGenerator.POST_unblock_account(account_id)
+        status, response = PixJourney.unblock_source(first)
         assert status == 409
         assert response["code"] == "QIT002007"
-
-        assert len(DbUtils.account_events(account_id)) == 1

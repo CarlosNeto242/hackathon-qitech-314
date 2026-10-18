@@ -1,11 +1,6 @@
 from errors import QIException
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Antifraude Pix (QIT002xxx)
-# ─────────────────────────────────────────────────────────────────────
-
-
 class NotFoundPixTransaction(QIException):
     code = "QIT002001"
 
@@ -18,12 +13,6 @@ class NotFoundPixTransaction(QIException):
 
 
 class InvalidPixDocumentNumber(QIException):
-    """CPF ou CNPJ com o formato certo e os dígitos verificadores errados.
-
-    Mesma lógica do InvalidDocumentNumber: 422, não 400. Diz o CAMPO, e
-    não o número, porque o número é dado pessoal e não volta na resposta.
-    """
-
     code = "QIT002002"
 
     def __init__(self, field) -> None:
@@ -35,8 +24,6 @@ class InvalidPixDocumentNumber(QIException):
 
 
 class InvalidDateTime(QIException):
-    """Data com o formato certo que não existe no calendário (ex.: dia 30 de fevereiro)."""
-
     code = "QIT002003"
 
     def __init__(self, field) -> None:
@@ -48,13 +35,6 @@ class InvalidDateTime(QIException):
 
 
 class AccountDataMismatch(QIException):
-    """A conta já existe com outro documento ou outra data de abertura.
-
-    A mensagem é genérica DE PROPÓSITO: não diz qual conta nem qual campo
-    divergiu, pra que a resposta não sirva de oráculo a quem testa
-    combinações de conta e documento. O detalhe fica no log.
-    """
-
     code = "QIT002005"
 
     def __init__(self) -> None:
@@ -68,33 +48,26 @@ class AccountDataMismatch(QIException):
 class NotFoundAccount(QIException):
     code = "QIT002006"
 
-    def __init__(self, account_id) -> None:
+    def __init__(self, participant, branch, account_number) -> None:
         title = "Account not Found"
         http_status = 404
-        description = f"Account with id {account_id} was not found."
-        translation = f"A conta com id {account_id} não foi encontrada."
+        description = f"Account {participant}/{branch}/{account_number} was not found."
+        translation = f"A conta {participant}/{branch}/{account_number} não foi encontrada."
         super().__init__(title, self.code, http_status, description, translation)
 
 
 class AccountAlreadyPermitted(QIException):
     code = "QIT002007"
 
-    def __init__(self, account_id) -> None:
+    def __init__(self, participant, branch, account_number) -> None:
         title = "Account already permitted"
         http_status = 409
-        description = f"Account with id {account_id} is not blocked."
+        description = f"Account {participant}/{branch}/{account_number} is not blocked."
         translation = "Essa conta não está bloqueada."
         super().__init__(title, self.code, http_status, description, translation)
 
 
 class PixIdConflict(QIException):
-    """O pix_id já foi usado por um Pix com outro conteúdo.
-
-    Reenvio com o MESMO conteúdo é idempotência e devolve a análise gravada.
-    Com conteúdo diferente, devolver a análise antiga seria aprovar uma
-    transação que nunca foi analisada (outro valor, outro destino).
-    """
-
     code = "QIT002008"
 
     def __init__(self, pix_id) -> None:

@@ -6,7 +6,6 @@ from models.pix_transaction import PixTransaction
 
 
 class AccountEvent(Base):
-
     __tablename__ = "events"
 
     REPEATED_RISK_REJECTIONS_DEST = "REPEATED_RISK_REJECTIONS_DEST"

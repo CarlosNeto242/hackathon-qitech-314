@@ -9,7 +9,6 @@ class DictUnavailable(Exception):
 
 
 class DictConnector(RestConnector):
-
     def __init__(self) -> None:
         super().__init__(
             class_name=__name__,
@@ -19,7 +18,6 @@ class DictConnector(RestConnector):
         )
 
     def get_person_statistics(self, document_number: str) -> BaseConnectorResponse:
-
         try:
             return self.send(
                 endpoint=f"/dict/{document_number}/statistics",
@@ -27,6 +25,5 @@ class DictConnector(RestConnector):
                 headers={"PI-RequestingParticipant": BANK_ISPB},
             )
         except requests.exceptions.RequestException as error:
-
             self.logger.warning(f"DICT indisponivel: {type(error).__name__}: {error}")
             raise DictUnavailable() from error

@@ -81,7 +81,7 @@ Todas exigem o header `INTERNAL-TOKEN` (padrão do Base Service), menos `/` e `/
 |---|---|---|
 | `/pix/transaction` | POST | **201** análise nova; **200** se o `pix_id` já existia com o mesmo conteúdo (devolve a análise gravada); **409** se o `pix_id` já existia com outro conteúdo; 400 payload inválido (schema, inclusive IP inválido); 422 valor impossível (data, dígito de CPF/CNPJ) ou divergência de dados da conta; 403 sem token |
 | `/pix/transaction/{pix_id}` | GET | 200 com a análise gravada (sem reanalisar); 404 se não existir |
-| `/admin/accounts/{account_id}/unblock` | POST | 200 com `id` e `status`; 403 sem token; 404 conta inexistente; 409 conta já `PERMITTED` |
+| `/admin/accounts/unblock` | POST | Corpo `{participant, branch, account_number}` (origem: `participant` = `BANK_ISPB`). 200 com os três campos e o `status`; 400 corpo inválido; 403 sem token; 404 conta inexistente; 409 conta já `PERMITTED` |
 
 - A decisão antifraude vai **no corpo**. `rejected` é uma análise bem-sucedida e responde 201/200, nunca 4xx.
 - POST e GET usam **a mesma função** (DTO) para montar a resposta.
@@ -228,8 +228,9 @@ README e código devem ter os mesmos valores.
 - `repositories/`: só consultas. `errors/custom_errors.py`: cada erro com código `QIT` único.
 - Banco: `database/database.sql` roda só quando o banco nasce (`docker compose down -v` para recriar).
 - Testes de integração por HTTP contra a API no Docker (`tests/integration/`); `DbUtils.rollback()` zera o banco.
-- Testes das regras (`tests/integration/rules/`) são jornadas pela API. Exceção: regras que olham o passado
-  (perfil de valor, média do CNPJ, pagadores de conta nova) têm o histórico plantado com `DbUtils.seed_*`.
+- Todos os testes passam pelas rotas (`RequestGenerator`/`PixJourney`), inclusive bloqueio (gerando rejeições até a
+  reincidência) e desbloqueio. `DbUtils` só onde é estritamente necessário: `rollback()` (do Base Service) e
+  `seed_*`, que plantam histórico antigo (perfil de valor, média do CNPJ, pagadores de conta nova, janela de 1 h).
 - Mock do DICT: serviço `dict-mock` do compose (`mocks/dict/server.py`). Documentos fixos: 11144477735 marcado,
   22255588846 lento, 33366699957 responde 500; os demais sem marcação.
 
@@ -238,46 +239,7 @@ README e código devem ter os mesmos valores.
 1. POST/GET com banco e idempotência. 2. Orquestrador e regras com testes. 3. Bloqueio e desbloqueio.
 4. README. 5. Refinamentos (DICT mock, regras extras).
 
-## 11. Brechas conhecidas (tests/integration/rules/test_fraud_attempts.py)
-
-Ataques que ainda passam pelo motor, marcados como `xfail(strict=True)`. Guardados para decidir depois.
-
-Fáceis (regra nova, sem mexer no banco):
-1. Empresa de fachada aberta ontem manda R$ 99.999: origem sem regra de idade de conta. Solução: limite de valor
-   menor para conta com menos de 30 dias (ex.: R$ 1.000 CPF / R$ 10.000 CNPJ) → 2FA `SRC_HIGH_AMOUNT`.
-2. Fracionamento (50 Pix de R$ 1.999 em 30 min): sem limite de soma enviada. Solução: soma enviada em 24 h acima de
-   um limite (ex.: R$ 10.000 CPF / R$ 1.000.000 CNPJ) → 2FA.
-3. ~~Laranja paciente~~ FECHADA: janela de 1 h no destino CPF (mais de 100 recebimentos → rejeita).
-4. Inflar o perfil de valor com 2FA não confirmado: Pix com 2FA entram no percentil. Solução: Pix com 2FA só entram
-   no histórico depois de alguns dias (ex.: 7), preservando a correção da circularidade.
-
-Médios (revertem a decisão "contagem por conta"; precisam de decisão do time):
-5. ~~Laranja com várias contas do mesmo CPF~~ FECHADA: as janelas de recebimento do CPF contam por documento.
-6. Laranja bloqueado abre outra conta. Solução: Pix para documento com alguma conta bloqueada → rejeita.
-
-Difíceis (limitação de fonte de dados; documentar no README):
-7. Aparelho clonado e sem localização (autodeclarados). Mitigação parcial: "localização sumiu" → 2FA.
-8. Conta laranja registrada com opening_date falsa. 9. Envenenar a conta da vítima com CPF errado. Causa comum: o
-   primeiro payload define o cadastro do destino; a solução real é o dado vir do DICT.
-
-## 12. Falsos positivos e atritos conhecidos (tests/integration/rules/test_legitimate_customers.py)
-
-Falso positivo = REJEITAR um cliente legítimo (marcado como `xfail(strict=True)`). 2FA num cliente legítimo é
-atrito, não falso positivo: o teste aceita, mas o atrito fica anotado. Decidir junto com a seção 11 (fechar brecha e
-reduzir falso positivo mexem nos mesmos parâmetros).
-
-Falsos positivos (rejeições): nenhum conhecido. Vaquinha com 15 amigos no mesmo minuto e 4 amigos pagando no mesmo
-segundo são rejeitados (janelas de 1 min e 1 s do destino CPF), mas foram considerados extremos pelo time e não
-entram como falso positivo.
-
-Atritos (2FA em rotina):
-1. Aluguel mensal de quem tem histórico: o aluguel é ~6% dos Pix em 90 dias e fica acima de 1,5x o p95. Ideia:
-   considerar o maior valor já pago ao mesmo destino (reverte a decisão "sem redução por destino conhecido").
-2. Pagar 5 contas do mês em sequência: 2FA no 4º (mais de 3 na janela de velocidade). Ideia: SRC_CPF_VELOCITY_2FA = 5.
-3. Folha de 30 funcionários: 2FA do 21º em diante (piso da rajada CNPJ = 20/h). Ideia: piso maior.
-4. Loja num dia de vendas forte (3,5x a média): o 7º comprador pede 2FA (fator 3). Ideia: fator 5.
-
-## 13. Desempenho (para o README)
+## 11. Desempenho (para o README)
 
 Medido em 18/10/2026, na suíte completa (802 `POST /pix/transaction`), com a API e o banco no Docker local.
 
@@ -285,14 +247,13 @@ Medido em 18/10/2026, na suíte completa (802 `POST /pix/transaction`), com a AP
 |---|---|---|---|---|
 | `POST /pix/transaction` | 24,5 ms | 118 ms | 266 ms | 335 ms |
 | `GET /pix/transaction/{id}` | 2,5 ms | 8,5 ms | 8,5 ms | 8,5 ms |
-| `POST /admin/accounts/{id}/unblock` | 3,7 ms | 24 ms | 24 ms | 24 ms |
+| `POST /admin/accounts/unblock` | 3,7 ms | 24 ms | 24 ms | 24 ms |
 
 - Um Pix típico é decidido em ~25 ms; o pior caso ficou em ~1/3 de segundo, dentro de "poucos segundos".
 - Acima de 300 ms, só dois casos, ambos esperados: (1) o DICT lento: o motor desiste no timeout de 300 ms e segue sem
   ele; (2) Pix simultâneos para a MESMA conta esperando a trava da conta (análise um por vez por conta, ~25 ms cada,
   pela proteção contra rajada). Contas diferentes não esperam umas pelas outras.
-- Suíte de testes: ~31 s, dos quais ~18 s são pausas de propósito em três testes que simulam o tempo entre Pix
-  (conta dividida no restaurante 9,5 s; conta nova recebendo de amigos 4,8 s; janela de 1 minuto do destino 3,9 s).
-  Sem eles, nenhum teste passa de 1 s.
+- Suíte de testes: ~12 s. O único teste acima de 1 s é a janela de 1 minuto do destino (~3,9 s), que espaça
+  os Pix de propósito pra testar a janela de 1 minuto sem disparar a de 1 segundo.
 - Como medir de novo: `pytest --durations=15` para os testes; para a API, as linhas `SAIU ... - X ms` do log
   (`docker compose logs api`).

@@ -5,17 +5,15 @@ from tests.utils import PayloadGenerator, RandomGenerator, RequestGenerator
 from tests.utils.requisition import ClientRequisition
 
 
-def mesma_origem_e_aparelho(primeiro: dict) -> dict:
-    """Um Pix novo da mesma conta de origem, pelo mesmo aparelho."""
+def from_same_source_and_device(first_payload: dict) -> dict:
     payload = PayloadGenerator.create_pix_transaction_payload()
-    payload["source_account"] = deepcopy(primeiro["source_account"])
-    payload["source"]["device_id"] = primeiro["source"]["device_id"]
+    payload["source_account"] = deepcopy(first_payload["source_account"])
+    payload["source"]["device_id"] = first_payload["source"]["device_id"]
     return payload
 
 
 class TestPixTransactionCreate:
     def test_first_pix_of_account_requires_2fa(self):
-        """O primeiro Pix de toda conta vem de um aparelho que ela nunca usou."""
         payload = PayloadGenerator.create_pix_transaction_payload()
 
         status, response = RequestGenerator.POST_pix_transaction(payload)
@@ -26,13 +24,11 @@ class TestPixTransactionCreate:
         assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
 
     def test_approves_pix_from_recognized_device(self):
-        """Depois do 2FA, o aparelho passa a ser reconhecido e o Pix normal é
-        aprovado, com metadata vazio."""
-        primeiro = PayloadGenerator.create_pix_transaction_payload()
-        status, _response = RequestGenerator.POST_pix_transaction(primeiro)
+        first_payload = PayloadGenerator.create_pix_transaction_payload()
+        status, _response = RequestGenerator.POST_pix_transaction(first_payload)
         assert status == 201
 
-        status, response = RequestGenerator.POST_pix_transaction(mesma_origem_e_aparelho(primeiro))
+        status, response = RequestGenerator.POST_pix_transaction(from_same_source_and_device(first_payload))
 
         assert status == 201
         assert response["status"] == "approved"
@@ -58,22 +54,19 @@ class TestPixTransactionCreate:
         assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
 
     def test_geolocation_is_optional(self):
-        """Sem o campo e com o campo nulo: os dois são "não veio localização"."""
-        sem_campo = PayloadGenerator.create_pix_transaction_payload()
-        del sem_campo["source"]["geolocation"]
+        missing_field = PayloadGenerator.create_pix_transaction_payload()
+        del missing_field["source"]["geolocation"]
 
-        campo_nulo = PayloadGenerator.create_pix_transaction_payload()
-        campo_nulo["source"]["geolocation"] = None
+        null_field = PayloadGenerator.create_pix_transaction_payload()
+        null_field["source"]["geolocation"] = None
 
-        for payload in (sem_campo, campo_nulo):
+        for payload in (missing_field, null_field):
             status, response = RequestGenerator.POST_pix_transaction(payload)
             assert status == 201
             assert response["metadata"] == {"reasons": ["SRC_NEW_DEVICE"]}
 
 
 class TestPixTransactionSchema:
-    """Payload que não se consegue ler: 400, e nada é gravado."""
-
     def test_refuses_empty_body(self):
         status, response = RequestGenerator.POST_pix_transaction({})
 
@@ -90,8 +83,7 @@ class TestPixTransactionSchema:
         assert response["code"] == "QIT000001"
 
     def test_refuses_missing_required_fields(self):
-        """Cada volta do laço tira UM campo obrigatório e mantém os outros."""
-        caminhos_obrigatorios = [
+        required_paths = [
             ("id",),
             ("amount",),
             ("transaction_date",),
@@ -105,16 +97,16 @@ class TestPixTransactionSchema:
             ("source", "ip"),
         ]
 
-        for caminho in caminhos_obrigatorios:
+        for field_path in required_paths:
             payload = PayloadGenerator.create_pix_transaction_payload()
-            alvo = payload
-            for parte in caminho[:-1]:
-                alvo = alvo[parte]
-            del alvo[caminho[-1]]
+            target = payload
+            for part in field_path[:-1]:
+                target = target[part]
+            del target[field_path[-1]]
 
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
-            assert status == 400, f"aceitou o payload sem {'.'.join(caminho)}"
+            assert status == 400, f"aceitou o payload sem {'.'.join(field_path)}"
             assert response["code"] == "QIT000001"
 
     def test_refuses_non_positive_amount(self):
@@ -126,7 +118,6 @@ class TestPixTransactionSchema:
             assert status == 400, f"aceitou amount={amount}"
 
     def test_refuses_date_without_timezone(self):
-        """Sem fuso, "22:15" pode ser qualquer um de vários instantes."""
         payload = PayloadGenerator.create_pix_transaction_payload()
         payload["transaction_date"] = "2026-10-17T22:15:00"
 
@@ -142,22 +133,22 @@ class TestPixTransactionSchema:
         assert status == 400
 
     def test_refuses_malformed_document_number(self):
-        formatos_invalidos = [
-            "1234567890",  # 10 dígitos
-            "123456789012",  # 12 dígitos
-            "123.456789-09",  # máscara de CPF pela metade
-            "12345678/0001-90",  # máscara de CNPJ pela metade
-            "123.456.789/09",  # separador errado
+        invalid_formats = [
+            "1234567890",
+            "123456789012",
+            "123.456789-09",
+            "12345678/0001-90",
+            "123.456.789/09",
             "abc.def.ghi-jk",
             "",
         ]
-        for documento in formatos_invalidos:
+        for document in invalid_formats:
             payload = PayloadGenerator.create_pix_transaction_payload()
-            payload["source_account"]["owner"]["document_number"] = documento
+            payload["source_account"]["owner"]["document_number"] = document
 
             status, _response = RequestGenerator.POST_pix_transaction(payload)
 
-            assert status == 400, f"aceitou o documento {documento!r}"
+            assert status == 400, f"aceitou o documento {document!r}"
 
     def test_refuses_partial_geolocation(self):
         payload = PayloadGenerator.create_pix_transaction_payload()
@@ -169,30 +160,26 @@ class TestPixTransactionSchema:
 
 
 class TestPixTransactionImpossibleValues:
-    """Formato certo, valor que não pode existir: 422."""
-
     def test_refuses_impossible_dates(self):
-        campos = [
+        fields = [
             ("transaction_date",),
             ("source_account", "opening_date"),
             ("destination_account", "opening_date"),
         ]
 
-        for caminho in campos:
+        for field_path in fields:
             payload = PayloadGenerator.create_pix_transaction_payload()
-            alvo = payload
-            for parte in caminho[:-1]:
-                alvo = alvo[parte]
-            alvo[caminho[-1]] = "2026-02-30T10:00:00-03:00"
+            target = payload
+            for part in field_path[:-1]:
+                target = target[part]
+            target[field_path[-1]] = "2026-02-30T10:00:00-03:00"
 
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
-            assert status == 422, f"aceitou 30 de fevereiro em {'.'.join(caminho)}"
+            assert status == 422, f"aceitou 30 de fevereiro em {'.'.join(field_path)}"
             assert response["code"] == "QIT002003"
 
     def test_refuses_invalid_ip(self):
-        """Quem recusa é o schema ("format" ipv4/ipv6), então é 400. Sem isso,
-        o valor chegaria à coluna INET e o Postgres responderia com um 500."""
         for ip in ("999.1.1.1", "nao-e-ip", "", "1.2.3"):
             payload = PayloadGenerator.create_pix_transaction_payload()
             payload["source"]["ip"] = ip
@@ -211,24 +198,22 @@ class TestPixTransactionImpossibleValues:
         assert status == 201
 
     def test_refuses_invalid_document_check_digits(self):
-        for papel in ("source_account", "destination_account"):
+        for role in ("source_account", "destination_account"):
             payload = PayloadGenerator.create_pix_transaction_payload()
-            payload[papel]["owner"]["document_number"] = "111.222.333-44"
+            payload[role]["owner"]["document_number"] = "111.222.333-44"
 
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
-            assert status == 422, f"aceitou CPF inválido em {papel}"
+            assert status == 422, f"aceitou CPF inválido em {role}"
             assert response["code"] == "QIT002002"
 
     def test_refuses_invalid_cnpj_check_digits(self):
-        """Mesma conta do CPF, com os pesos do CNPJ. Inclui o CNPJ de dígitos
-        todos iguais, que passa na conta e mesmo assim não existe."""
-        for documento in ("11.222.333/0001-80", "11111111111111"):
-            payload = PayloadGenerator.create_pix_transaction_payload(destination_document_number=documento)
+        for document in ("11.222.333/0001-80", "11111111111111"):
+            payload = PayloadGenerator.create_pix_transaction_payload(destination_document_number=document)
 
             status, response = RequestGenerator.POST_pix_transaction(payload)
 
-            assert status == 422, f"aceitou o CNPJ {documento}"
+            assert status == 422, f"aceitou o CNPJ {document}"
             assert response["code"] == "QIT002002"
 
     def test_invalid_pix_is_not_recorded(self):
@@ -243,75 +228,67 @@ class TestPixTransactionImpossibleValues:
 
 
 class TestPixTransactionAccountData:
-    """A mesma conta em dois Pix: o cadastro gravado e o payload têm que bater."""
-
     def test_same_document_with_and_without_punctuation(self):
-        primeiro = PayloadGenerator.create_pix_transaction_payload()
-        segundo = PayloadGenerator.create_pix_transaction_payload()
-        segundo["source_account"] = deepcopy(primeiro["source_account"])
+        first_payload = PayloadGenerator.create_pix_transaction_payload()
+        second_payload = PayloadGenerator.create_pix_transaction_payload()
+        second_payload["source_account"] = deepcopy(first_payload["source_account"])
 
-        documento = primeiro["source_account"]["owner"]["document_number"]
-        segundo["source_account"]["owner"]["document_number"] = documento.replace(".", "").replace("-", "")
+        document = first_payload["source_account"]["owner"]["document_number"]
+        second_payload["source_account"]["owner"]["document_number"] = document.replace(".", "").replace("-", "")
 
-        for payload in (primeiro, segundo):
+        for payload in (first_payload, second_payload):
             status, _response = RequestGenerator.POST_pix_transaction(payload)
             assert status == 201
 
     def test_same_opening_date_in_another_timezone(self):
-        """10:00 em -03:00 e 13:00 em UTC são o mesmo instante, não divergência."""
-        primeiro = PayloadGenerator.create_pix_transaction_payload()
-        segundo = PayloadGenerator.create_pix_transaction_payload()
-        segundo["source_account"] = deepcopy(primeiro["source_account"])
-        segundo["source_account"]["opening_date"] = "2025-03-02T13:00:00Z"
+        first_payload = PayloadGenerator.create_pix_transaction_payload()
+        second_payload = PayloadGenerator.create_pix_transaction_payload()
+        second_payload["source_account"] = deepcopy(first_payload["source_account"])
+        second_payload["source_account"]["opening_date"] = "2025-03-02T13:00:00Z"
 
-        for payload in (primeiro, segundo):
+        for payload in (first_payload, second_payload):
             status, _response = RequestGenerator.POST_pix_transaction(payload)
             assert status == 201
 
     def test_refuses_divergent_account_data(self):
-        """Documento ou data de abertura diferentes do cadastro: 422 genérico,
-        e o Pix não fica gravado."""
-        divergencias = [
+        divergences = [
             ("source_account", "owner", "document_number", RandomGenerator.generate_cpf()),
             ("source_account", "opening_date", "2024-01-01T10:00:00-03:00"),
             ("destination_account", "owner", "document_number", RandomGenerator.generate_cpf()),
             ("destination_account", "opening_date", "2024-01-01T10:00:00-03:00"),
         ]
 
-        for *caminho, valor in divergencias:
-            primeiro = PayloadGenerator.create_pix_transaction_payload()
-            status, _response = RequestGenerator.POST_pix_transaction(primeiro)
+        for *field_path, value in divergences:
+            first_payload = PayloadGenerator.create_pix_transaction_payload()
+            status, _response = RequestGenerator.POST_pix_transaction(first_payload)
             assert status == 201
 
-            segundo = PayloadGenerator.create_pix_transaction_payload()
-            papel = caminho[0]
-            segundo[papel] = deepcopy(primeiro[papel])
-            alvo = segundo
-            for parte in caminho[:-1]:
-                alvo = alvo[parte]
-            alvo[caminho[-1]] = valor
+            second_payload = PayloadGenerator.create_pix_transaction_payload()
+            role = field_path[0]
+            second_payload[role] = deepcopy(first_payload[role])
+            target = second_payload
+            for part in field_path[:-1]:
+                target = target[part]
+            target[field_path[-1]] = value
 
-            status, response = RequestGenerator.POST_pix_transaction(segundo)
-            assert status == 422, f"aceitou divergência em {'.'.join(caminho)}"
+            status, response = RequestGenerator.POST_pix_transaction(second_payload)
+            assert status == 422, f"aceitou divergência em {'.'.join(field_path)}"
             assert response["code"] == "QIT002005"
 
-            status, _response = RequestGenerator.GET_pix_transaction(segundo["id"])
+            status, _response = RequestGenerator.GET_pix_transaction(second_payload["id"])
             assert status == 404
 
     def test_source_participant_from_payload_is_ignored(self):
-        """A origem é sempre deste banco: o participant que vier no payload não
-        cria uma conta nova. Prova: a mesma agência e conta com outro
-        participant e outro CPF caem na MESMA linha, e dão divergência."""
-        primeiro = PayloadGenerator.create_pix_transaction_payload()
-        primeiro["source_account"]["participant"] = "11111111"
-        status, _response = RequestGenerator.POST_pix_transaction(primeiro)
+        first_payload = PayloadGenerator.create_pix_transaction_payload()
+        first_payload["source_account"]["participant"] = "11111111"
+        status, _response = RequestGenerator.POST_pix_transaction(first_payload)
         assert status == 201
 
-        segundo = PayloadGenerator.create_pix_transaction_payload()
-        segundo["source_account"] = deepcopy(primeiro["source_account"])
-        segundo["source_account"]["participant"] = "22222222"
-        segundo["source_account"]["owner"]["document_number"] = RandomGenerator.generate_cpf()
+        second_payload = PayloadGenerator.create_pix_transaction_payload()
+        second_payload["source_account"] = deepcopy(first_payload["source_account"])
+        second_payload["source_account"]["participant"] = "22222222"
+        second_payload["source_account"]["owner"]["document_number"] = RandomGenerator.generate_cpf()
 
-        status, response = RequestGenerator.POST_pix_transaction(segundo)
+        status, response = RequestGenerator.POST_pix_transaction(second_payload)
         assert status == 422
         assert response["code"] == "QIT002005"
